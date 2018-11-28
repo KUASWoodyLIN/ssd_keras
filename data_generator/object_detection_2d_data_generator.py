@@ -539,6 +539,119 @@ class DataGenerator:
         if ret:
             return self.images, self.filenames, self.labels, self.image_ids, self.eval_neutral
 
+    def parse_txt(self,
+                  images_dirs,
+                  annotations_dirs=[],
+                  classes=['background', 'person'],
+                  include_classes='all',
+                  ret=False,
+                  verbose=True):
+        '''
+        This is an XML parser for the Pascal VOC datasets. It might be applicable to other datasets with minor changes to
+        the code, but in its current form it expects the data format and XML tags of the Pascal VOC datasets.
+
+        Arguments:
+            images_dirs (list): A list of strings, where each string is the path of a directory that
+                contains images that are to be part of the dataset. This allows you to aggregate multiple datasets
+                into one (e.g. one directory that contains the images for Pascal VOC 2007, another that contains
+                the images for Pascal VOC 2012, etc.).
+            image_set_filenames (list): A list of strings, where each string is the path of the text file with the image
+                set to be loaded. Must be one file per image directory given. These text files define what images in the
+                respective image directories are to be part of the dataset and simply contains one image ID per line
+                and nothing else.
+            annotations_dirs (list, optional): A list of strings, where each string is the path of a directory that
+                contains the annotations (XML files) that belong to the images in the respective image directories given.
+                The directories must contain one XML file per image and the name of an XML file must be the image ID
+                of the image it belongs to. The content of the XML files must be in the Pascal VOC format.
+            classes (list, optional): A list containing the names of the object classes as found in the
+                `name` XML tags. Must include the class `background` as the first list item. The order of this list
+                defines the class IDs.
+            include_classes (list, optional): Either 'all' or a list of integers containing the class IDs that
+                are to be included in the dataset. If 'all', all ground truth boxes will be included in the dataset.
+            exclude_truncated (bool, optional): If `True`, excludes boxes that are labeled as 'truncated'.
+            exclude_difficult (bool, optional): If `True`, excludes boxes that are labeled as 'difficult'.
+            ret (bool, optional): Whether or not to return the outputs of the parser.
+            verbose (bool, optional): If `True`, prints out the progress for operations that may take a bit longer.
+
+        Returns:
+            None by default, optionally lists for whichever are available of images, image filenames, labels, image IDs,
+            and a list indicating which boxes are annotated with the label "difficult".
+        '''
+        # Set class members.
+        self.images_dirs = images_dirs
+        self.annotations_dirs = annotations_dirs
+        self.classes = classes
+        self.include_classes = include_classes
+
+        # Erase data that might have been parsed before.
+        self.filenames = []
+        self.image_ids = []
+        self.labels = []
+        if not annotations_dirs:
+            self.labels = None
+            annotations_dirs = [None] * len(images_dirs)
+
+
+        for images_dir, annotations_dir in zip(images_dirs, annotations_dirs):
+            # Read the image set file that so that we know all the IDs of all the images to be included in the dataset.
+            image_ids = [i.split('.jpg')[0] for i in os.listdir(images_dir)]
+            self.image_ids += image_ids
+
+            it = image_ids
+
+            # Loop over all images in this dataset.
+            for image_id in it:
+
+                filename = '{}'.format(image_id) + '.jpg'
+                self.filenames.append(os.path.join(images_dir, filename))
+
+                if not annotations_dir is None:
+                    # Parse the txt file for this image.
+                    with open(os.path.join(annotations_dir, image_id + '.txt')) as f:
+                        lines = f.readlines()
+
+                    boxes = [] # We'll store all boxes for this image here.
+
+                    # Parse the data for each object.
+                    for line in lines:
+                        class_name, xmin, ymin, xmax, ymax,  = line.split()
+                        class_id = self.classes.index(class_name)
+
+                        # Check whether this class is supposed to be included in the dataset.
+                        if (not self.include_classes == 'all') and (not class_id in self.include_classes): continue
+                        # Get the bounding box coordinates.
+                        xmin = int(xmin)
+                        ymin = int(ymin)
+                        xmax = int(xmax)
+                        ymax = int(ymax)
+                        item_dict = {'image_name': filename,
+                                     'image_id': image_id,
+                                     'class_name': class_name,
+                                     'class_id': class_id,
+                                     'xmin': xmin,
+                                     'ymin': ymin,
+                                     'xmax': xmax,
+                                     'ymax': ymax}
+                        box = []
+                        for item in self.labels_output_format:
+                            box.append(item_dict[item])
+                        boxes.append(box)
+
+                    self.labels.append(boxes)
+
+        self.dataset_size = len(self.filenames)
+        self.dataset_indices = np.arange(self.dataset_size, dtype=np.int32)
+        if self.load_images_into_memory:
+            self.images = []
+            if verbose: it = tqdm(self.filenames, desc='Loading images into memory', file=sys.stdout)
+            else: it = self.filenames
+            for filename in it:
+                with Image.open(filename) as image:
+                    self.images.append(np.array(image, dtype=np.uint8))
+
+        if ret:
+            return self.images, self.filenames, self.labels, self.image_ids
+
     def parse_json(self,
                    images_dirs,
                    annotations_filenames,
@@ -1218,3 +1331,27 @@ class DataGenerator:
             The number of images in the dataset.
         '''
         return self.dataset_size
+
+
+if __name__ == '__main__':
+    # TODO: Set the paths to the datasets here.
+    dataset_path = '/home/share/dataset/DarkData'
+
+    # The directories that contain the images.
+    DARK_train_day_images_dir = os.path.join(dataset_path, 'images/train_day')
+    DARK_train_night_images_dir = os.path.join(dataset_path, 'images/train_night')
+    DARK_val_day_images_dir = os.path.join(dataset_path, 'images/val_day')
+    DARK_val_night_images_dir = os.path.join(dataset_path, 'images/val_night')
+
+    # The directories that contain the annotations.
+    DARK_train_day_annotations_dir = os.path.join(dataset_path, 'labels/train_day')
+    DARK_train_night_annotations_dir = os.path.join(dataset_path, 'labels/train_night')
+    DARK_val_day_annotations_dir = os.path.join(dataset_path, 'labels/val_day')
+    DARK_val_night_annotations_dir = os.path.join(dataset_path, 'labels/val_night')
+
+    train_dataset = DataGenerator(load_images_into_memory=False, hdf5_dataset_path=None)
+    classes = ['background', 'person']
+    train_dataset.parse_txt(images_dirs=[DARK_train_day_images_dir, DARK_train_night_images_dir],
+                            annotations_dirs=[DARK_train_day_annotations_dir, DARK_train_night_annotations_dir],
+                            classes=classes,
+                            ret=False)

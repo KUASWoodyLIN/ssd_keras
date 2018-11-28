@@ -96,3 +96,15 @@ ENV/
 
 # Ignore any files and directories that begin with the word "local"
 local*
+
+# ignore files
+*.jpg
+*.png
+*.weights
+*.h5
+logs/
+tmp*
+eval_logs*
+.idea/
+models_save/
+models_data/
